@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Shared packages for every Wayland compositor under install/wayland/<wm>.
+set -uo pipefail
+
+: "${AUR_HELPER:=paru}"
+
+NOTIFY_DAEMON=swaync
+BAR=waybar
+
+"$AUR_HELPER" -S --needed --noconfirm \
+    $NOTIFY_DAEMON \
+    $BAR \
+    wofi                    `# wayland launcher (used by waybar buttons for custom spawning)` \
+    grim                    `# screenshot tool` \
+    slurp                   `# region selector (pairs with grim)` \
+    wl-clipboard            `# wl-copy / wl-paste` \
+    qt5-wayland             `# Qt5 native wayland plugin` \
+    qt6-wayland             `# Qt6 native wayland plugin` \
+    nwg-look                `# GTK theme/icon selector (wayland lxappearance)` \
+    playerctl               `# media-key controller (MPRIS)` \
+    polkit-kde-agent        `# polkit auth agent (Qt-based)`
+
+# EGL-Wayland bridge is only useful on Nvidia.
+if lspci | grep -qi 'VGA.*nvidia\|3D.*nvidia'; then
+    "$AUR_HELPER" -S --needed --noconfirm egl-wayland
+fi
+

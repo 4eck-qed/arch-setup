@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+"$THIS_DIR/base"
+
+: "${AUR_HELPER:=paru}"
+BAR=polybar
+
+"$AUR_HELPER" -S --needed --noconfirm \
+    $BAR \
+    bspwm                   `# tiling window manager` \
+    sxhkd                   `# hotkey daemon (bspwm keybinds)` \
+    rofi                    `# launcher / window switcher / runner (X11)` \
+    stalonetray             `# standalone system tray` \
+    pamixer                 `# pulse/pipewire volume control (CLI)`

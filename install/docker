@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+: "${AUR_HELPER:=paru}"
+
+"$AUR_HELPER" -S --needed --noconfirm docker docker-rootless-extras
+
+echo ""
+echo "Post-install steps (manual):"
+echo "  - Set '/etc/subuid'  -> '<username>:165536:65536'"
+echo "  - Set '/etc/subgid'  -> '<username>:165536:65536'"
+echo "  - Add to shell rc    -> 'export DOCKER_HOST=unix://\$XDG_RUNTIME_DIR/docker.sock'"
+echo "  - Create '/etc/modprobe.d/disable-overlay-redirect-dir.conf':"
+echo "      options overlay metacopy=off redirect_dir=off"
+
+sudo modprobe -r overlay
+sudo modprobe overlay

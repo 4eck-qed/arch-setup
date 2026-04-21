@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+SHARED_HOME="/home/shared"
+
+mkdir -p \
+    "$HOME/.config" \
+    "$HOME/.local" \
+    "$HOME/Projects" \
+    "$SHARED_HOME/.config" \
+    "$SHARED_HOME/.local" \
+    "$SHARED_HOME/fonts" \
+    "$SHARED_HOME/Pictures" \
+    "$SHARED_HOME/Programs" \
+    "$SHARED_HOME/release" \
+    "$SHARED_HOME/Scripts"

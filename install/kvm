@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "$THIS_DIR/.." && pwd)"
+PROMPT_BIN="$ROOT_DIR/support/prompt"
+
+#################################################
+#                   PACKAGES                    #
+#################################################
+PKGS=(
+    libvirt
+    qemu-desktop
+    virt-manager
+    edk2-ovmf
+    swtpm
+    dnsmasq
+    nftables
+    libnbd
+)
+
+#################################################
+#                    RUN                        #
+#################################################
+"$ROOT_DIR/support/install_packages" "${PKGS[@]}"
+
+# libnbd occasionally conflicts with files from other packages
+sudo pacman -S --needed --noconfirm --overwrite '/usr/lib/*' libnbd || true
+
+sudo systemctl enable --now libvirtd.service
+
+# Default NAT network
+if ! sudo virsh net-info default 2>/dev/null | grep -q "Active: *yes"; then
+    sudo virsh net-start default
+fi
+sudo virsh net-autostart default 2>/dev/null || true
+
+sudo usermod -aG libvirt,kvm,input "$USER"
+
+if [[ -x "$PROMPT_BIN" ]] && "$PROMPT_BIN" "Wanna virtualize OSX?"; then
+    "$THIS_DIR/kvm_osx"
+fi
+
+if [[ -x "$PROMPT_BIN" ]] && "$PROMPT_BIN" "Do you use UFW as firewall?"; then
+    echo "Adding UFW rules for virbr0.."
+    if ! sudo grep -q "^\*nat" /etc/ufw/before.rules; then
+        sudo sed -i '1i *nat\n:POSTROUTING ACCEPT [0:0]\n-A POSTROUTING -s 192.168.122.0/24 -j MASQUERADE\nCOMMIT\n' /etc/ufw/before.rules
+    fi
+    sudo ufw route allow in on virbr0
+    sudo ufw route allow out on virbr0
+    sudo ufw allow in on virbr0
+    sudo ufw reload
+else
+    echo "No UFW - libvirt's own NAT rules handle virbr0."
+fi
+
+echo ""
+echo "Done. Log out and back in for libvirt/kvm/input group membership to take effect."
+

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+"$THIS_DIR/base"
+
+: "${AUR_HELPER:=paru}"
+
+"$AUR_HELPER" -S --needed --noconfirm \
+    hyprland                        `# wayland compositor` \
+    hyprpicker                      `# color picker` \
+    hyprlock                        `# screen locker` \
+    hypridle                        `# idle manager (timeouts to lock/dpms)` \
+    hyprcursor                      `# cursor theme engine` \
+    awww                            `# animated wallpaper daemon (GIF + transitions)` \
+    xdg-desktop-portal-hyprland     `# portal backend (screen share, file pickers)` \
+    wlogout                         `# logout/shutdown menu`
+

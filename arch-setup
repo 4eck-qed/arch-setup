@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+
+#################################################
+#                   CONSTANTS                   #
+#################################################
+KEYBOARD_CFG="setxkbmap -layout us -variant altgr-intl"
+PROMPT_BIN="$THIS_DIR/support/prompt"
+
+export AUR_HELPER="paru"
+
+#################################################
+#                   FUNCTIONS                   #
+#################################################
+append_line_if_missing() {
+    local line="$1"
+    local file="$2"
+
+    mkdir -p "$(dirname "$file")"
+    touch "$file"
+
+    grep -qxF "$line" "$file" || echo "$line" >> "$file"
+}
+
+require_cmd() {
+    command -v "$1" >/dev/null 2>&1 || {
+        echo "Missing required command: $1" >&2
+        exit 1
+    }
+}
+
+# Detect GPU vendor(s): lspci first, fall back to installed packages.
+# Prints one vendor per line. May print multiple on hybrid systems.
+detect_gpu_vendors() {
+    local -A seen=()
+    local out=""
+
+    if command -v lspci >/dev/null 2>&1; then
+        out="$(lspci -nn | grep -iE 'vga|3d|display' || true)"
+        grep -qi 'nvidia'                               <<<"$out" && seen[nvidia]=1
+        grep -qiE 'amd|ati|advanced micro devices'      <<<"$out" && seen[amd]=1
+        grep -qi 'intel'                                <<<"$out" && seen[intel]=1
+    fi
+
+    if (( ${#seen[@]} == 0 )); then
+        pacman -Qq nvidia-utils nvidia-open-dkms nvidia-dkms 2>/dev/null | grep -q . && seen[nvidia]=1
+        pacman -Qq vulkan-radeon                             2>/dev/null | grep -q . && seen[amd]=1
+        pacman -Qq vulkan-intel                              2>/dev/null | grep -q . && seen[intel]=1
+    fi
+
+    printf '%s\n' "${!seen[@]}"
+}
+
+#################################################
+
+require_cmd sudo
+if ! command -v git >/dev/null 2>&1; then
+    echo "Detected missing requirement: git"
+    echo "-> Installing git.."
+    sudo pacman -S --noconfirm git
+fi
+
+if [[ -f "$THIS_DIR/.gitmodules" ]]; then
+    echo "-> Syncing submodules.."
+    git -C "$THIS_DIR" submodule update --init --recursive
+fi
+
+[[ -x "$PROMPT_BIN" ]] || {
+    echo "Prompt helper not found or not executable: $PROMPT_BIN" >&2
+    exit 1
+}
+
+echo "Welcome to barons one-script-to-success!" && sleep 1
+echo -n "We're starting in 3" && sleep 1
+echo -n ", 2" && sleep 1
+echo ", 1" && sleep 1
+
+echo -n "First of all we need to run updates.."
+sudo pacman -Syu --noconfirm
+echo "done!"
+
+#################################################
+#                CORE PACKAGES                  #
+#################################################
+mapfile -t GPU_VENDORS < <(detect_gpu_vendors)
+
+if (( ${#GPU_VENDORS[@]} == 0 )); then
+    echo "Could not auto-detect GPU."
+    while true; do
+        read -rp "Enter GPU vendor(s) [nvidia amd intel, space-separated]: " line
+        read -ra GPU_VENDORS <<<"$line"
+        (( ${#GPU_VENDORS[@]} > 0 )) && break
+    done
+else
+    echo "Detected GPU vendor(s): ${GPU_VENDORS[*]}"
+fi
+
+"$THIS_DIR/install/core" "${GPU_VENDORS[@]}"
+
+#################################################
+#                    WM                         #
+#################################################
+while true; do
+    echo "Which window manager do you wanna use?"
+    echo "  X11:     1) bspwm   2) dwm"
+    echo "  Wayland: 3) hyprland"
+
+    read -rp ": " choice
+
+    case "$choice" in
+        1) echo "Installing bspwm..";    "$THIS_DIR/install/x11/bspwm";        break ;;
+        2) echo "Installing dwm..";      "$THIS_DIR/install/x11/dwm";          break ;;
+        3) echo "Installing hyprland.."; "$THIS_DIR/install/wayland/hyprland"; break ;;
+        *) echo "Unknown option '$choice'" ;;
+    esac
+done
+
+#################################################
+#                    VM                         #
+#################################################
+if "$PROMPT_BIN" "Do you want to use virtual machines?"; then
+    "$THIS_DIR/install/kvm"
+fi
+
+#################################################
+#                  CONFIG                       #
+#################################################
+echo ">> Configuration <<"
+append_line_if_missing "$KEYBOARD_CFG" "$HOME/.xinitrc"
+
+# Disable automatic core dumps
+sudo touch /etc/sysctl.d/50-coredump.conf
+if ! sudo grep -qxF "kernel.core_pattern=/dev/null" /etc/sysctl.d/50-coredump.conf; then
+    echo "kernel.core_pattern=/dev/null" | sudo tee -a /etc/sysctl.d/50-coredump.conf >/dev/null
+fi
+sudo sysctl --system >/dev/null
+
+echo "--- All done ---"

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Yes/no prompt. Exits 0 on yes, 1 on anything else (default = no).
+
+subject="${1:-Confirm?}"
+
+read -rp "$subject (y/[n]): " response
+response="${response,,}"
+
+[[ "$response" == "y" || "$response" == "yes" ]]

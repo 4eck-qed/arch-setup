@@ -1,0 +1,428 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "$THIS_DIR/.." && pwd)"
+DOTFILES_DIR="$ROOT_DIR/dotfiles"
+
+GPU_VENDORS=("$@") # one or more of: nvidia, amd, intel
+(( ${#GPU_VENDORS[@]} > 0 )) || {
+    echo "no gpu vendors provided - available: nvidia,amd,intel" >&2
+    exit 1
+}
+for v in "${GPU_VENDORS[@]}"; do
+    case "$v" in
+        nvidia|amd|intel) ;;
+        *) echo "unknown gpu '$v' - available: nvidia,amd,intel" >&2; exit 1 ;;
+    esac
+done
+
+#################################################
+#                   PACKAGES                    #
+#################################################
+
+# ---- Networking ----------------------------------------
+NETWORK=(
+    networkmanager              # NM daemon (wifi/ethernet)
+    network-manager-applet      # tray GUI for NM
+    openssh                     # ssh client + sshd
+)
+
+# ---- Shell / CLI utilities -----------------------------
+CORE_UTILS=(
+    curl                        # HTTP client
+    wget                        # HTTP downloader
+    rsync                       # file sync / backups
+    less                        # pager
+    unzip                       # .zip extraction
+    unrar                       # .rar extraction
+    7zip
+    man-db                      # man page tooling
+    man-pages                   # Linux man pages
+    bat                         # cat with syntax highlighting
+    ripgrep                     # fast grep (rg)
+    fd                          # fast find (fd)
+    lsd                         # ls with icons
+    tree                        # directory tree printer
+    btop                        # system resource monitor
+    fastfetch                   # system info
+    mc                          # midnight commander (TUI file manager)
+    flatpak                     # flatpak runtime + CLI
+    mono
+    # tmux                        # terminal multiplexer
+)
+
+# ---- XDG / desktop integration -------------------------
+XDG=(
+    xdg-user-dirs               # creates ~/Downloads, ~/Documents, etc.
+    xdg-utils                   # xdg-open, xdg-mime
+    gvfs                        # virtual filesystems (trash, mounts)
+    gvfs-mtp                    # MTP support (android phones)
+    gvfs-smb                    # SMB support (windows shares)
+    tumbler                     # thumbnail service for thunar
+)
+
+# ---- Core desktop (FM + terminal + launcher) -----------
+DESKTOP=(
+    polkit                      # authorization-agent lib
+    thunar                      # GUI file manager
+    thunar-archive-plugin       # archive context-menu for thunar
+    ark                         # KDE standalone archiver
+    alacritty                   # GPU-accelerated terminal
+    ulauncher                   # desktop-wide app launcher (X11 + Wayland)
+)
+
+# ---- Fonts ---------------------------------------------
+FONTS=(
+    fontconfig
+    ttf-liberation              # web-safe replacements for MS fonts
+    ttf-dejavu                  # broad coverage, used as fallback
+    noto-fonts                  # Google Noto - latin coverage
+    noto-fonts-emoji            # emoji glyphs
+    noto-fonts-cjk              # CJK (chinese/japanese/korean)
+    ttf-nerd-fonts-symbols      # nerd-font icon set
+    ttf-nerd-fonts-symbols-mono # monospaced variant
+    otf-font-awesome            # font awesome icons (polybar/waybar)
+    ttf-jetbrains-mono-nerd     # JetBrainsMono Nerd Font
+    ttf-iosevka-nerd            # Iosevka Nerd Font
+    ttf-ubuntu-font-family      # Ubuntu / Ubuntu Bold
+    ttf-inconsolata             # Inconsolata
+    ttf-fira-code               # FiraCode
+    ttf-hack-nerd               # Hack Nerd Font
+    cantarell-fonts             # Cantarell (dunst/calendar)
+)
+
+# ---- Security ------------------------------------------
+SECURITY=(
+    chkrootkit
+    rkhunter
+)
+
+# ---- Audio (pipewire stack) ----------------------------
+AUDIO=(
+    pipewire                    # low-latency multimedia server
+    pipewire-alsa               # ALSA compatibility
+    pipewire-jack               # JACK compatibility
+    pipewire-pulse              # PulseAudio compatibility
+    wireplumber                 # session/policy manager
+    pavucontrol                 # GUI mixer
+)
+
+# ---- GPU: Nvidia ---------------------------------------
+# Userspace + tooling, shared across kernel-module variants.
+GPU_NVIDIA=(
+    dkms                        # kernel module build system
+    nvidia-utils                # proprietary userspace driver (libGL, libEGL, nvidia-smi, ...)
+    lib32-nvidia-utils          # 32-bit userspace (steam/wine)
+    nvidia-settings             # control-panel GUI
+    libva-nvidia-driver         # VAAPI video decode
+)
+# Kernel module variant is picked by detect_nvidia_driver, with prompt fallback.
+GPU_NVIDIA_OPEN=(nvidia-open-dkms)    # Turing/Volta and newer (20xx, 16xx, 30xx, 40xx, 50xx)
+GPU_NVIDIA_PROPRIETARY=(nvidia-dkms)  # Pascal (10xx), Maxwell (9xx), Kepler, Fermi
+
+# ---- GPU: AMD ------------------------------------------
+GPU_AMD=(
+    mesa                        # OpenGL drivers
+    lib32-mesa
+    vulkan-radeon               # Vulkan driver (RADV)
+    lib32-vulkan-radeon
+    amd-ucode                   # CPU microcode updates
+    linux-firmware              # firmware blobs
+    mesa-utils                  # glxinfo / glxgears
+    vulkan-mesa-layers          # extra vulkan layers
+    lib32-vulkan-mesa-layers
+    libva-mesa-driver           # VAAPI video decode
+    lib32-libva-mesa-driver
+    mesa-vdpau                  # VDPAU video decode (legacy)
+    lib32-mesa-vdpau
+    radeontop                   # GPU activity viewer
+)
+
+# ---- GPU: Intel ----------------------------------------
+GPU_INTEL=(
+    mesa                        # OpenGL drivers
+    lib32-mesa
+    vulkan-intel                # Vulkan driver (ANV)
+    lib32-vulkan-intel
+    intel-media-driver          # VAAPI video decode (Gen8+)
+    mesa-utils                  # glxinfo / glxgears
+    vulkan-mesa-layers          # extra vulkan layers
+    lib32-vulkan-mesa-layers
+    intel-gpu-tools             # intel_gpu_top and related diagnostics
+)
+
+# ---- Hardware monitoring -------------------------------
+MONITORING=(
+    lm_sensors                  # CPU/board temps + fan readings (run `sensors-detect`)
+)
+
+# ---- Dev: VCS ------------------------------------------
+DEV_VCS=(
+    git-credential-oauth        # OAuth-based git credential helper
+    gitui                       # TUI git client
+)
+
+# ---- Dev: C / C++ --------------------------------------
+DEV_C_CPP=(
+    clang                       # LLVM C/C++ compiler
+    llvm                        # LLVM toolchain
+    cmake                       # build generator
+    cmake-format                # CMakeLists formatter
+    ninja                       # fast build backend
+    make                        # GNU make
+    astyle                      # C/C++/Java/C# code formatter
+)
+
+# ---- Dev: .NET -----------------------------------------
+DEV_DOTNET=(
+    dotnet-host                 # shared host (entrypoint)
+    dotnet-runtime              # CLR
+    dotnet-sdk                  # SDK (compiler + tools)
+    dotnet-targeting-pack       # current .NET targeting pack
+    aspnet-runtime              # ASP.NET runtime
+    aspnet-targeting-pack       # ASP.NET targeting pack
+    netstandard-targeting-pack  # .NET Standard targeting
+    nuget                       # NuGet CLI
+)
+
+# ---- Dev: Rust -----------------------------------------
+DEV_RUST=(
+    rustup                      # toolchain manager
+)
+
+# ---- Dev: Python ---------------------------------------
+DEV_PYTHON=(
+    python                      # CPython 3 interpreter
+    python-packaging            # packaging utils (dep of black and others)
+    python-black                # python formatter
+)
+
+# ---- Dev: Lua ------------------------------------------
+DEV_LUA=(
+    lua                         # lua interpreter
+    luarocks                    # lua package manager
+    stylua                      # lua formatter
+)
+
+# ---- Dev: JS / TS --------------------------------------
+DEV_JS=(
+    nodejs                      # JS runtime
+    npm                         # node package manager
+    nvm                         # node version manager
+    typescript                  # tsc compiler
+    prettier                    # JS/TS/CSS/HTML/MD formatter
+)
+
+# ---- Dev: editor / neovim ------------------------------
+DEV_EDITOR=(
+    neovim                      # editor
+    code-minimap                # minimap renderer (nvim minimap plugins)
+)
+
+# ---- Optional: browsers --------------------------------
+OPT_BROWSERS=(
+    brave-bin                   # brave browser (AUR; official binary)
+)
+
+# ---- Optional: Java ------------------------------------
+OPT_JAVA=(
+    jdk-openjdk                 # OpenJDK (includes JRE)
+)
+
+# ---- Optional: wallet (brave/chrome integration) -------
+OPT_WALLET=(
+    kwallet-pam                 # auto-unlock kdewallet on login
+    kwalletmanager              # kdewallet GUI manager
+)
+
+# ---- Optional: media creation --------------------------
+OPT_MEDIA_CREATION=(
+    obs-studio                  # screen recorder / streaming
+    audacity                    # audio editor
+    pinta                       # simple image editor (paint.net-like)
+)
+
+# ---- Optional: media playback --------------------------
+OPT_MEDIA_PLAYBACK=(
+    vlc                         # video/audio player
+    vlc-plugins-all
+    ffmpeg
+    gst-plugins-good
+    gst-plugins-bad-libs
+)
+
+# ---- Optional: gaming ----------------------------------
+OPT_GAMING=(
+    steam                       # steam client (requires multilib)
+    lutris                      # game launcher (non-steam)
+    wine                        # windows compat layer
+    wine-mono                   # .NET support for wine
+    wine-gecko                  # HTML rendering for wine
+)
+
+#################################################
+#                   FUNCTIONS                   #
+#################################################
+enable_multilib() {
+    local pacman_conf="/etc/pacman.conf"
+
+    sudo -v
+
+    if grep -qE '^\s*\[multilib\]' "$pacman_conf"; then
+        echo "Multilib repository is already enabled."
+    else
+        sudo sed -i '/^#\[multilib\]/,/^#Include/{s/^#//}' "$pacman_conf"
+        echo "Multilib repository enabled."
+    fi
+
+    sudo pacman -Syu --noconfirm
+}
+
+install_paru() {
+    if command -v paru >/dev/null 2>&1; then
+        echo "paru is already installed."
+        return 0
+    fi
+
+    echo ">> Installing paru <<"
+    sudo pacman -S --needed --noconfirm base-devel git
+
+    local build_dir
+    build_dir="$(mktemp -d)"
+    trap 'rm -rf "$build_dir"' RETURN
+
+    git clone https://aur.archlinux.org/paru.git "$build_dir/paru"
+    (cd "$build_dir/paru" && makepkg -si --noconfirm)
+}
+
+install_zsh_plugins() {
+    local base="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins"
+    mkdir -p "$base"
+
+    local -a repos=(
+        "https://github.com/zsh-users/zsh-history-substring-search"
+        "https://github.com/zsh-users/zsh-syntax-highlighting.git"
+        "https://github.com/zsh-users/zsh-autosuggestions"
+        "https://github.com/jirutka/zsh-shift-select.git"
+    )
+
+    for repo in "${repos[@]}"; do
+        local name
+        name="$(basename "$repo" .git)"
+        if [[ ! -d "$base/$name/.git" ]]; then
+            git clone --depth=1 "$repo" "$base/$name"
+        else
+            echo "$name already present - skipping."
+        fi
+    done
+}
+
+install_pkgs() {
+    "$ROOT_DIR/support/install_packages" "$@"
+}
+
+# Pick NVIDIA kernel module variant from the installed GPU's architecture codename.
+# Echoes "open" (Turing/Volta+) or "proprietary" (Pascal and older).
+# Empty output = could not determine; caller should prompt.
+detect_nvidia_driver() {
+    command -v lspci >/dev/null 2>&1 || return 0
+
+    local line arch
+    line="$(lspci -nn | grep -i 'nvidia' | grep -iE 'vga|3d|display' | head -n 1 || true)"
+    [[ -z "$line" ]] && return 0
+
+    # pciutils embeds the chip codename (e.g. GA102, TU116, GP104) in the device name.
+    arch="$(grep -oE '\b(GV|TU|GA|AD|GH|GB|GP|GM|GK|GF)[0-9]+' <<<"$line" | head -n 1 || true)"
+
+    case "$arch" in
+        GV*|TU*|GA*|AD*|GH*|GB*) echo "open" ;;
+        GP*|GM*|GK*|GF*)         echo "proprietary" ;;
+    esac
+}
+
+#################################################
+#                    RUN                        #
+#################################################
+enable_multilib
+install_paru
+
+sudo pacman -S --noconfirm --needed zsh git base-devel
+
+echo ">> Networking <<"
+install_pkgs "${NETWORK[@]}"
+sudo systemctl enable --now NetworkManager || true
+
+echo ">> Shell / CLI utilities <<"
+install_pkgs "${CORE_UTILS[@]}"
+
+echo ">> XDG / desktop integration <<"
+install_pkgs "${XDG[@]}"
+
+echo ">> Core desktop <<"
+install_pkgs "${DESKTOP[@]}"
+
+echo ">> Fonts <<"
+install_pkgs "${FONTS[@]}"
+mkdir -p "$HOME/.local/share/fonts"
+cp -rT "$DOTFILES_DIR/.local/share/fonts" "$HOME/.local/share/fonts"
+fc-cache -fv
+
+echo ">> Security <<"
+install_pkgs "${SECURITY[@]}"
+
+echo ">> Audio <<"
+install_pkgs "${AUDIO[@]}"
+
+echo ">> GPU <<"
+for v in "${GPU_VENDORS[@]}"; do
+    case "$v" in
+        nvidia)
+            nvidia_variant="$(detect_nvidia_driver)"
+            if [[ -z "$nvidia_variant" ]]; then
+                echo "Could not auto-detect NVIDIA GPU generation."
+                if "$ROOT_DIR/support/prompt" "Use nvidia-open-dkms? [y=open (Turing/20xx+), n=proprietary nvidia-dkms (Pascal/older)]"; then
+                    nvidia_variant="open"
+                else
+                    nvidia_variant="proprietary"
+                fi
+            fi
+            echo "NVIDIA kernel module variant: $nvidia_variant"
+            case "$nvidia_variant" in
+                open)        install_pkgs "${GPU_NVIDIA[@]}" "${GPU_NVIDIA_OPEN[@]}" ;;
+                proprietary) install_pkgs "${GPU_NVIDIA[@]}" "${GPU_NVIDIA_PROPRIETARY[@]}" ;;
+            esac
+            ;;
+        amd)   install_pkgs "${GPU_AMD[@]}" ;;
+        intel) install_pkgs "${GPU_INTEL[@]}" ;;
+    esac
+done
+
+echo ">> Hardware monitoring <<"
+install_pkgs "${MONITORING[@]}"
+
+echo ">> Dev packages <<"
+install_pkgs \
+    "${DEV_VCS[@]}" \
+    "${DEV_C_CPP[@]}" \
+    "${DEV_DOTNET[@]}" \
+    "${DEV_RUST[@]}" \
+    "${DEV_PYTHON[@]}" \
+    "${DEV_LUA[@]}" \
+    "${DEV_JS[@]}" \
+    "${DEV_EDITOR[@]}"
+
+git-credential-oauth configure || true
+
+echo ">> Optional packages <<"
+install_pkgs \
+    "${OPT_BROWSERS[@]}" \
+    "${OPT_JAVA[@]}" \
+    "${OPT_WALLET[@]}" \
+    "${OPT_MEDIA_CREATION[@]}" \
+    "${OPT_MEDIA_PLAYBACK[@]}" \
+    "${OPT_GAMING[@]}"
+
+install_zsh_plugins
+
+echo "--- core done ---"

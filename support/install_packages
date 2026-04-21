@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Install packages one by one via an AUR helper, showing progress.
+# Usage: install_packages pkg1 pkg2 pkg3 ...
+
+set -uo pipefail
+
+AUR_HELPER="${AUR_HELPER:-paru}"
+
+if ! command -v "$AUR_HELPER" >/dev/null 2>&1; then
+    echo "AUR helper '$AUR_HELPER' not found" >&2
+    exit 1
+fi
+
+pkgs=("$@")
+count=${#pkgs[@]}
+
+if (( count == 0 )); then
+    echo "no packages to install"
+    exit 0
+fi
+
+i=1
+failed=()
+for pkg in "${pkgs[@]}"; do
+    printf '== [%s] (%d/%d)\n' "$pkg" "$i" "$count"
+    if ! "$AUR_HELPER" -S --needed --noconfirm --overwrite '*' "$pkg"; then
+        failed+=("$pkg")
+    fi
+    i=$((i + 1))
+done
+
+if (( ${#failed[@]} > 0 )); then
+    echo ""
+    echo "failed to install: ${failed[*]}" >&2
+    exit 1
+fi

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Shared packages for every X11 WM under install/x11/<wm>.
+set -uo pipefail
+
+: "${AUR_HELPER:=paru}"
+
+NOTIFY_DAEMON=dunst
+
+"$AUR_HELPER" -S --needed --noconfirm \
+    $NOTIFY_DAEMON \
+    xorg-server             `# X11 display server` \
+    xorg-xinit              `# startx + ~/.xinitrc` \
+    xorg-xsetroot           `# set X root cursor/bg (ricing scripts)` \
+    xorg-xdpyinfo           `# X display info` \
+    picom                   `# X11 compositor (shadows, fading, vsync)` \
+    feh                     `# wallpaper setter + image viewer` \
+    flameshot               `# screenshot tool` \
+    polkit-kde-agent        `# polkit auth agent (Qt-based)` \
+    dmenu                   `# minimal universal launcher (fallback)` \
+    lxappearance            `# GTK2/3 theme/icon selector` \
+    xclip                   `# X clipboard CLI` \
+    xdotool                 `# keyboard/mouse input simulation`

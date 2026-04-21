@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+"$THIS_DIR/base"
+
+: "${AUR_HELPER:=paru}"
+
+# dwm and bar are built from source (suckless patches), so only deps here.
+"$AUR_HELPER" -S --needed --noconfirm \
+    libxft                  `# font rendering (dwm status bar)` \
+    libxinerama             `# multi-monitor support`

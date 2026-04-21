@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "$THIS_DIR/.." && pwd)"
+
+#################################################
+#                   PACKAGES                    #
+#################################################
+PKGS=(
+    dmg2img             # .dmg -> raw .img converter (AUR)
+    guestfs-tools       # libguestfs tools (edit/inspect VM images offline)
+    cdrtools            # provides mkisofs
+    uml_utilities       # tunctl etc. (OSX-KVM network scripts need it; AUR)
+)
+
+#################################################
+#                    RUN                        #
+#################################################
+"$ROOT_DIR/support/install_packages" "${PKGS[@]}"
+
+cd "$HOME"
+if [[ ! -d OSX-KVM ]]; then
+    git clone --depth 1 --recursive https://github.com/kholia/OSX-KVM.git
+fi
+cd OSX-KVM
+
+# OSX guests read MSRs that linux kvm doesn't emulate; ignoring them prevents crashes.
+if grep -q "AuthenticAMD" /proc/cpuinfo; then
+    sudo cp kvm_amd.conf /etc/modprobe.d/kvm.conf
+elif grep -q "GenuineIntel" /proc/cpuinfo; then
+    sudo cp kvm_intel.conf /etc/modprobe.d/kvm.conf 2>/dev/null || \
+        echo "options kvm ignore_msrs=1" | sudo tee /etc/modprobe.d/kvm.conf >/dev/null
+fi
+
+# Ventura is the recommended target; modern nvidia GPUs may require High Sierra.
+echo ">> Fetching macOS installer (recommended: Ventura 13) <<"
+python ./fetch-macOS-v2.py
+
+if [[ -f BaseSystem.dmg && ! -f BaseSystem.img ]]; then
+    dmg2img -i BaseSystem.dmg BaseSystem.img
+fi
+
+# Renaming mac_hdd_ng.img requires editing the OSX-KVM boot scripts too.
+if [[ ! -f mac_hdd_ng.img ]]; then
+    qemu-img create -f qcow2 mac_hdd_ng.img 256G
+fi
+
+echo "--- kvm_osx done: OSX-KVM cloned at $HOME/OSX-KVM ---"
