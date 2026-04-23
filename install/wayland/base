@@ -2,26 +2,33 @@
 # Shared packages for every Wayland compositor under install/wayland/<wm>.
 set -uo pipefail
 
-: "${AUR_HELPER:=paru}"
+THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "$THIS_DIR/../.." && pwd)"
+INSTALL_PKGS="$ROOT_DIR/support/install_packages"
 
-NOTIFY_DAEMON=swaync
-BAR=waybar
-
-"$AUR_HELPER" -S --needed --noconfirm \
-    $NOTIFY_DAEMON \
-    $BAR \
-    wofi                    `# wayland launcher (used by waybar buttons for custom spawning)` \
-    grim                    `# screenshot tool` \
-    slurp                   `# region selector (pairs with grim)` \
-    wl-clipboard            `# wl-copy / wl-paste` \
-    qt5-wayland             `# Qt5 native wayland plugin` \
-    qt6-wayland             `# Qt6 native wayland plugin` \
-    nwg-look                `# GTK theme/icon selector (wayland lxappearance)` \
-    playerctl               `# media-key controller (MPRIS)` \
-    polkit-kde-agent        `# polkit auth agent (Qt-based)`
+PKGS=(
+    swaync                  # notification daemon
+    waybar                  # status bar
+    wofi                    # wayland launcher
+    grim                    # screenshot tool
+    slurp                   # region selector (pairs with grim)
+    wl-clipboard            # wl-copy / wl-paste
+    qt5-wayland             # Qt5 native wayland plugin
+    qt6-wayland             # Qt6 native wayland plugin
+    nwg-look                # GTK theme/icon selector
+    playerctl               # media-key controller (MPRIS)
+    polkit-kde-agent        # polkit auth agent (Qt-based)
+)
 
 # EGL-Wayland bridge is only useful on Nvidia.
-if lspci | grep -qi 'VGA.*nvidia\|3D.*nvidia'; then
-    "$AUR_HELPER" -S --needed --noconfirm egl-wayland
+_has_nvidia() { lspci 2>/dev/null | grep -qi 'VGA.*nvidia\|3D.*nvidia'; }
+if _has_nvidia; then
+    PKGS+=(egl-wayland)
 fi
 
+if [[ "${COUNT_ONLY:-0}" == "1" ]]; then
+    printf '%s\n' "${#PKGS[@]}"
+    exit 0
+fi
+
+SEG_LABEL="Wayland base" "$INSTALL_PKGS" "${PKGS[@]}"

@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+# Persistent progress UI with two bars pinned to the bottom of the terminal:
+#   - current segment ("Fonts  [======>   ] 8/16 ttf-jetbrains-mono-nerd")
+#   - overall total   ("TOTAL  [========> ] 87/245 (35%)")
+#
+# Uses the DEC "set top and bottom margins" sequence (\e[T;Br) so everything
+# printed to the tty scrolls within the top region and leaves our two bars
+# untouched.
+#
+# Subcommands:
+#   init TOTAL                set total, reserve bottom two lines, draw
+#   segment LABEL [SEG_TOTAL] start a new segment; seg_total 0 = indeterminate
+#   step [ITEM]               advance total + segment by one, redraw
+#   add_total N               bump TOTAL (useful if underestimated)
+#   finish                    restore scroll region and cursor
+#   redraw                    repaint bars (after resize etc.)
+#
+# State is shared across invocations via a file (path from
+# $ARCH_SETUP_PROGRESS_STATE). The parent sets that env var so child
+# processes hit the same state.
+
+set -uo pipefail
+
+STATE_FILE="${ARCH_SETUP_PROGRESS_STATE:-/tmp/arch-setup-progress.$$}"
+TTY_PATH="${ARCH_SETUP_PROGRESS_TTY:-/dev/tty}"
+
+_have_tty() {
+    [[ -w "$TTY_PATH" && -r "$TTY_PATH" ]]
+}
+
+_save_state() {
+    local tmp="${STATE_FILE}.$$"
+    {
+        printf 'TOTAL=%s\n'     "$TOTAL"
+        printf 'DONE=%s\n'      "$DONE"
+        printf 'SEGMENT=%q\n'   "$SEGMENT"
+        printf 'SEG_TOTAL=%s\n' "$SEG_TOTAL"
+        printf 'SEG_DONE=%s\n'  "$SEG_DONE"
+        printf 'ITEM=%q\n'      "$ITEM"
+        printf 'ROWS=%s\n'      "$ROWS"
+        printf 'COLS=%s\n'      "$COLS"
+    } > "$tmp"
+    mv "$tmp" "$STATE_FILE"
+}
+
+_load_state() {
+    TOTAL=0; DONE=0; SEGMENT=""; SEG_TOTAL=0; SEG_DONE=0; ITEM=""; ROWS=24; COLS=80
+    if [[ -f "$STATE_FILE" ]]; then
+        # shellcheck disable=SC1090
+        source "$STATE_FILE"
+    fi
+}
+
+_truncate() {
+    # _truncate STRING WIDTH
+    local s="$1" w="$2"
+    if (( ${#s} > w )); then
+        printf '%s' "${s:0:w}"
+    else
+        printf '%s' "$s"
+    fi
+}
+
+_bar() {
+    # _bar LABEL DONE TOTAL WIDTH LABEL_WIDTH
+    local label="$1" done="$2" total="$3" width="$4" lw="$5"
+    local filled=0 pct=0 suffix=""
+    if (( total > 0 )); then
+        filled=$(( width * done / total ))
+        (( filled > width )) && filled=$width
+        pct=$(( 100 * done / total ))
+        suffix=$(printf '%d/%d (%d%%%%)' "$done" "$total" "$pct")
+    else
+        suffix="$done"
+    fi
+    local bar="" i
+    for ((i = 0; i < width; i++)); do
+        if (( i < filled )); then
+            bar+='='
+        elif (( i == filled && total > 0 )); then
+            bar+='>'
+        else
+            bar+=' '
+        fi
+    done
+    printf '%-*s [%s] ' "$lw" "$(_truncate "$label" "$lw")" "$bar"
+    # shellcheck disable=SC2059
+    printf "$suffix"
+}
+
+_redraw() {
+    _have_tty || return 0
+    _load_state
+    local label_w=28
+    local bar_w=$(( COLS - label_w - 24 ))
+    (( bar_w > 10 )) || bar_w=10
+
+    local seg_label="${SEGMENT:-starting...}"
+    if [[ -n "$ITEM" ]]; then
+        seg_label="$seg_label  ·  $ITEM"
+    fi
+
+    {
+        printf '\0337'                              # save cursor + attrs (DECSC)
+        printf '\033[%d;1H\033[2K' "$((ROWS - 1))"  # seg line
+        _bar "$seg_label" "$SEG_DONE" "$SEG_TOTAL" "$bar_w" "$label_w"
+        printf '\033[%d;1H\033[2K' "$ROWS"          # total line
+        _bar "TOTAL" "$DONE" "$TOTAL" "$bar_w" "$label_w"
+        printf '\0338'                              # restore cursor + attrs (DECRC)
+    } >"$TTY_PATH"
+}
+
+cmd_init() {
+    local total="${1:-0}"
+    if _have_tty; then
+        ROWS=$(tput lines 2>/dev/null || echo 24)
+        COLS=$(tput cols  2>/dev/null || echo 80)
+    else
+        ROWS=24; COLS=80
+    fi
+    TOTAL="$total"; DONE=0; SEGMENT=""; SEG_TOTAL=0; SEG_DONE=0; ITEM=""
+    _save_state
+
+    _have_tty || return 0
+
+    {
+        # Ensure there's empty room at the bottom for the two bars.
+        printf '\n\n'
+        # Set the scrolling region to rows 1..ROWS-2 so the bottom two lines
+        # are pinned.
+        printf '\033[1;%dr' "$((ROWS - 2))"
+        # Park cursor at the bottom of the scroll region so the next line of
+        # output doesn't land on top of the bars.
+        printf '\033[%d;1H' "$((ROWS - 2))"
+    } >"$TTY_PATH"
+
+    _redraw
+}
+
+cmd_segment() {
+    _load_state
+    SEGMENT="${1:-}"
+    SEG_TOTAL="${2:-0}"
+    SEG_DONE=0
+    ITEM=""
+    _save_state
+    _redraw
+}
+
+cmd_step() {
+    _load_state
+    ITEM="${1:-}"
+    DONE=$(( DONE + 1 ))
+    SEG_DONE=$(( SEG_DONE + 1 ))
+    (( DONE > TOTAL )) && TOTAL="$DONE"
+    _save_state
+    _redraw
+}
+
+cmd_add_total() {
+    _load_state
+    TOTAL=$(( TOTAL + ${1:-0} ))
+    _save_state
+    _redraw
+}
+
+cmd_finish() {
+    _load_state
+    if _have_tty; then
+        {
+            printf '\0337'                              # save cursor
+            printf '\033[%d;1H\033[2K' "$((ROWS - 1))"  # clear seg line
+            printf '\033[%d;1H\033[2K' "$ROWS"          # clear total line
+            printf '\0338'                              # restore cursor
+            printf '\033[r'                             # reset scrolling region
+            printf '\033[%d;1H\n' "$ROWS"               # park cursor at bottom
+        } >"$TTY_PATH"
+    fi
+    rm -f "$STATE_FILE"
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+    init)      cmd_init "$@" ;;
+    segment)   cmd_segment "$@" ;;
+    step)      cmd_step "$@" ;;
+    add_total) cmd_add_total "$@" ;;
+    finish)    cmd_finish "$@" ;;
+    redraw)    _redraw ;;
+    *)
+        echo "usage: progress {init TOTAL | segment LABEL [SEG_TOTAL] | step [ITEM] | add_total N | finish | redraw}" >&2
+        exit 2
+        ;;
+esac

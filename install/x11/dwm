@@ -2,11 +2,21 @@
 set -uo pipefail
 
 THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
-"$THIS_DIR/base"
-
-: "${AUR_HELPER:=paru}"
+ROOT_DIR="$(cd -- "$THIS_DIR/../.." && pwd)"
+INSTALL_PKGS="$ROOT_DIR/support/install_packages"
 
 # dwm and bar are built from source (suckless patches), so only deps here.
-"$AUR_HELPER" -S --needed --noconfirm \
-    libxft                  `# font rendering (dwm status bar)` \
-    libxinerama             `# multi-monitor support`
+PKGS=(
+    libxft                  # font rendering (dwm status bar)
+    libxinerama             # multi-monitor support
+)
+
+if [[ "${COUNT_ONLY:-0}" == "1" ]]; then
+    base_count="$(COUNT_ONLY=1 "$THIS_DIR/base")"
+    printf '%s\n' "$(( base_count + ${#PKGS[@]} ))"
+    exit 0
+fi
+
+"$THIS_DIR/base"
+
+SEG_LABEL="dwm" "$INSTALL_PKGS" "${PKGS[@]}"

@@ -2,15 +2,24 @@
 set -uo pipefail
 
 THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "$THIS_DIR/../.." && pwd)"
+INSTALL_PKGS="$ROOT_DIR/support/install_packages"
+
+PKGS=(
+    polybar                 # status bar
+    bspwm                   # tiling window manager
+    sxhkd                   # hotkey daemon
+    rofi                    # launcher / window switcher / runner (X11)
+    stalonetray             # standalone system tray
+    pamixer                 # pulse/pipewire volume control (CLI)
+)
+
+if [[ "${COUNT_ONLY:-0}" == "1" ]]; then
+    base_count="$(COUNT_ONLY=1 "$THIS_DIR/base")"
+    printf '%s\n' "$(( base_count + ${#PKGS[@]} ))"
+    exit 0
+fi
+
 "$THIS_DIR/base"
 
-: "${AUR_HELPER:=paru}"
-BAR=polybar
-
-"$AUR_HELPER" -S --needed --noconfirm \
-    $BAR \
-    bspwm                   `# tiling window manager` \
-    sxhkd                   `# hotkey daemon (bspwm keybinds)` \
-    rofi                    `# launcher / window switcher / runner (X11)` \
-    stalonetray             `# standalone system tray` \
-    pamixer                 `# pulse/pipewire volume control (CLI)`
+SEG_LABEL="bspwm" "$INSTALL_PKGS" "${PKGS[@]}"

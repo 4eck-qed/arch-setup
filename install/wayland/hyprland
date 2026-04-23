@@ -2,23 +2,32 @@
 set -uo pipefail
 
 THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "$THIS_DIR/../.." && pwd)"
+INSTALL_PKGS="$ROOT_DIR/support/install_packages"
+
+PKGS=(
+    hyprland                        # wayland compositor
+    hyprpicker                      # color picker
+    hyprlock                        # screen locker
+    hypridle                        # idle manager (timeouts to lock/dpms)
+    hyprcursor                      # cursor theme engine
+    awww                            # animated wallpaper daemon
+    xdg-desktop-portal-hyprland     # portal backend (screen share, file pickers)
+    wlogout                         # logout/shutdown menu
+)
+
+if [[ "${COUNT_ONLY:-0}" == "1" ]]; then
+    base_count="$(COUNT_ONLY=1 "$THIS_DIR/base")"
+    printf '%s\n' "$(( base_count + ${#PKGS[@]} ))"
+    exit 0
+fi
+
 "$THIS_DIR/base"
 
-: "${AUR_HELPER:=paru}"
-
-"$AUR_HELPER" -S --needed --noconfirm \
-    hyprland                        `# wayland compositor` \
-    hyprpicker                      `# color picker` \
-    hyprlock                        `# screen locker` \
-    hypridle                        `# idle manager (timeouts to lock/dpms)` \
-    hyprcursor                      `# cursor theme engine` \
-    awww                            `# animated wallpaper daemon (GIF + transitions)` \
-    xdg-desktop-portal-hyprland     `# portal backend (screen share, file pickers)` \
-    wlogout                         `# logout/shutdown menu`
+SEG_LABEL="Hyprland" "$INSTALL_PKGS" "${PKGS[@]}"
 
 # split-workspaces
 hyprpm update
 hyprpm add https://github.com/zjeffer/split-monitor-workspaces
 hyprpm enable split-monitor-workspaces
 hyprpm reload
-

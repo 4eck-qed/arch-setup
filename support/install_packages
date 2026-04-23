@@ -1,10 +1,26 @@
 #!/usr/bin/env bash
-# Install packages one by one via an AUR helper, showing progress.
+# Install packages one by one via an AUR helper.
+#
 # Usage: install_packages pkg1 pkg2 pkg3 ...
+#
+# Env:
+#   AUR_HELPER                AUR helper to call (default: paru)
+#   SEG_LABEL                 segment label used by the progress UI
+#   ARCH_SETUP_PROGRESS_STATE if set, progress bars are updated per package
+#                             (otherwise the fallback "== [pkg] (i/n)" lines
+#                             are printed)
 
 set -uo pipefail
 
 AUR_HELPER="${AUR_HELPER:-paru}"
+SEG_LABEL="${SEG_LABEL:-packages}"
+
+THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+PROGRESS="$THIS_DIR/progress"
+progress_on=0
+if [[ -n "${ARCH_SETUP_PROGRESS_STATE:-}" && -x "$PROGRESS" ]]; then
+    progress_on=1
+fi
 
 if ! command -v "$AUR_HELPER" >/dev/null 2>&1; then
     echo "AUR helper '$AUR_HELPER' not found" >&2
@@ -15,17 +31,31 @@ pkgs=("$@")
 count=${#pkgs[@]}
 
 if (( count == 0 )); then
-    echo "no packages to install"
+    (( progress_on )) && "$PROGRESS" segment "$SEG_LABEL" 0
     exit 0
+fi
+
+if (( progress_on )); then
+    "$PROGRESS" segment "$SEG_LABEL" "$count"
 fi
 
 i=1
 failed=()
 for pkg in "${pkgs[@]}"; do
-    printf '== [%s] (%d/%d)\n' "$pkg" "$i" "$count"
+    if (( progress_on )); then
+        printf '-- [%s/%s] %s: %s\n' "$i" "$count" "$SEG_LABEL" "$pkg"
+    else
+        printf '== [%s] (%d/%d)\n' "$pkg" "$i" "$count"
+    fi
+
     if ! "$AUR_HELPER" -S --needed --noconfirm --overwrite '*' "$pkg"; then
         failed+=("$pkg")
     fi
+
+    if (( progress_on )); then
+        "$PROGRESS" step "$pkg"
+    fi
+
     i=$((i + 1))
 done
 

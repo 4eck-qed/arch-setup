@@ -2,21 +2,29 @@
 # Shared packages for every X11 WM under install/x11/<wm>.
 set -uo pipefail
 
-: "${AUR_HELPER:=paru}"
+THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "$THIS_DIR/../.." && pwd)"
+INSTALL_PKGS="$ROOT_DIR/support/install_packages"
 
-NOTIFY_DAEMON=dunst
+PKGS=(
+    dunst                   # notification daemon
+    xorg-server             # X11 display server
+    xorg-xinit              # startx + ~/.xinitrc
+    xorg-xsetroot           # set X root cursor/bg
+    xorg-xdpyinfo           # X display info
+    picom                   # X11 compositor
+    feh                     # wallpaper setter + image viewer
+    flameshot               # screenshot tool
+    polkit-kde-agent        # polkit auth agent (Qt-based)
+    dmenu                   # minimal universal launcher (fallback)
+    lxappearance            # GTK2/3 theme/icon selector
+    xclip                   # X clipboard CLI
+    xdotool                 # keyboard/mouse input simulation
+)
 
-"$AUR_HELPER" -S --needed --noconfirm \
-    $NOTIFY_DAEMON \
-    xorg-server             `# X11 display server` \
-    xorg-xinit              `# startx + ~/.xinitrc` \
-    xorg-xsetroot           `# set X root cursor/bg (ricing scripts)` \
-    xorg-xdpyinfo           `# X display info` \
-    picom                   `# X11 compositor (shadows, fading, vsync)` \
-    feh                     `# wallpaper setter + image viewer` \
-    flameshot               `# screenshot tool` \
-    polkit-kde-agent        `# polkit auth agent (Qt-based)` \
-    dmenu                   `# minimal universal launcher (fallback)` \
-    lxappearance            `# GTK2/3 theme/icon selector` \
-    xclip                   `# X clipboard CLI` \
-    xdotool                 `# keyboard/mouse input simulation`
+if [[ "${COUNT_ONLY:-0}" == "1" ]]; then
+    printf '%s\n' "${#PKGS[@]}"
+    exit 0
+fi
+
+SEG_LABEL="X11 base" "$INSTALL_PKGS" "${PKGS[@]}"

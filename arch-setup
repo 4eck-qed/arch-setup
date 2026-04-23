@@ -9,8 +9,11 @@ THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 #################################################
 KEYBOARD_CFG="setxkbmap -layout us -variant altgr-intl"
 PROMPT_BIN="$THIS_DIR/support/prompt"
+CHECKBOX_BIN="$THIS_DIR/support/checkbox"
+PROGRESS_BIN="$THIS_DIR/support/progress"
 DOTFILES_BIN="$THIS_DIR/support/dotfiles"
 INSTALL_CONFIG_BIN="$THIS_DIR/support/install_config"
+CORE_BIN="$THIS_DIR/install/core"
 
 export AUR_HELPER="paru"
 export DOTFILES_DIR="${DOTFILES_DIR:-$HOME/dotfiles}"
@@ -36,7 +39,6 @@ require_cmd() {
 }
 
 # Detect GPU vendor(s): lspci first, fall back to installed packages.
-# Prints one vendor per line. May print multiple on hybrid systems.
 detect_gpu_vendors() {
     local -A seen=()
     local out=""
@@ -57,8 +59,34 @@ detect_gpu_vendors() {
     printf '%s\n' "${!seen[@]}"
 }
 
-#################################################
+detect_nvidia_variant() {
+    command -v lspci >/dev/null 2>&1 || return 0
+    local line arch
+    line="$(lspci -nn | grep -i 'nvidia' | grep -iE 'vga|3d|display' | head -n 1 || true)"
+    [[ -z "$line" ]] && return 0
+    arch="$(grep -oE '\b(GV|TU|GA|AD|GH|GB|GP|GM|GK|GF)[0-9]+' <<<"$line" | head -n 1 || true)"
+    case "$arch" in
+        GV*|TU*|GA*|AD*|GH*|GB*) echo "open" ;;
+        GP*|GM*|GK*|GF*)         echo "proprietary" ;;
+    esac
+}
 
+banner() {
+    cat <<'EOF'
+
+                     ▌           ▐        
+            ▝▀▖▙▀▖▞▀▖▛▀▖▄▄▖▞▀▘▞▀▖▜▀ ▌ ▌▛▀▖
+            ▞▀▌▌  ▌ ▖▌ ▌   ▝▀▖▛▀ ▐ ▖▌ ▌▙▄▘
+            ▝▀▘▘  ▝▀ ▘ ▘   ▀▀ ▝▀▘ ▀ ▝▀▘▌
+
+         -- 4eck-qed's one-script-to-success --
+
+EOF
+}
+
+#################################################
+#                 PREREQUISITES                 #
+#################################################
 require_cmd sudo
 if ! command -v git >/dev/null 2>&1; then
     echo "Detected missing requirement: git"
@@ -71,30 +99,54 @@ if [[ -f "$THIS_DIR/.gitmodules" ]]; then
     git -C "$THIS_DIR" submodule update --init --recursive
 fi
 
-for bin in "$PROMPT_BIN" "$DOTFILES_BIN" "$INSTALL_CONFIG_BIN"; do
+for bin in "$PROMPT_BIN" "$CHECKBOX_BIN" "$PROGRESS_BIN" "$DOTFILES_BIN" "$INSTALL_CONFIG_BIN" "$CORE_BIN"; do
     [[ -x "$bin" ]] || {
         echo "Support helper not found or not executable: $bin" >&2
         exit 1
     }
 done
 
-echo "-> Fetching dotfiles.."
-"$DOTFILES_BIN" >/dev/null
-
-echo "Welcome to barons one-script-to-success!" && sleep 1
-echo -n "We're starting in 3" && sleep 1
-echo -n ", 2" && sleep 1
-echo ", 1" && sleep 1
-
-echo -n "First of all we need to run updates.."
-sudo pacman -Syu --noconfirm
-echo "done!"
+#################################################
+#                    GREETING                   #
+#################################################
+clear
+banner
+echo "This will:"
+echo "  * install core packages (network, desktop, fonts, audio, GPU drivers, ...)"
+echo "  * set up a window manager and its config"
+echo "  * install dev and optional package groups you pick below"
+echo "  * (optionally) set up KVM virtualization"
+echo
 
 #################################################
-#                CORE PACKAGES                  #
+#                   SUDO ONCE                   #
 #################################################
+echo "-> Requesting sudo credentials (asked once; kept warm in background)."
+sudo -v
+
+# Keep the sudo timestamp fresh so pacman/paru don't re-prompt.
+sudo_keepalive() {
+    while sudo -nv 2>/dev/null; do
+        sleep 50
+    done
+}
+sudo_keepalive &
+SUDO_KEEPALIVE_PID=$!
+
+cleanup() {
+    [[ -n "${SUDO_KEEPALIVE_PID:-}" ]] && kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+    if [[ -n "${ARCH_SETUP_PROGRESS_STATE:-}" ]]; then
+        "$PROGRESS_BIN" finish 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
+
+#################################################
+#             COLLECT ALL ANSWERS               #
+#################################################
+# 1) GPU vendor(s)
 mapfile -t GPU_VENDORS < <(detect_gpu_vendors)
-
 if (( ${#GPU_VENDORS[@]} == 0 )); then
     echo "Could not auto-detect GPU."
     while true; do
@@ -106,39 +158,147 @@ else
     echo "Detected GPU vendor(s): ${GPU_VENDORS[*]}"
 fi
 
-"$THIS_DIR/install/core" "${GPU_VENDORS[@]}"
+# 2) NVIDIA kernel module variant (only if NVIDIA detected)
+NVIDIA_VARIANT=""
+for v in "${GPU_VENDORS[@]}"; do
+    if [[ "$v" == "nvidia" ]]; then
+        NVIDIA_VARIANT="$(detect_nvidia_variant)"
+        if [[ -z "$NVIDIA_VARIANT" ]]; then
+            echo "Could not auto-detect NVIDIA GPU generation."
+            if "$PROMPT_BIN" "Use nvidia-open-dkms? [y=open (Turing/20xx+), n=proprietary nvidia-dkms (Pascal/older)]"; then
+                NVIDIA_VARIANT="open"
+            else
+                NVIDIA_VARIANT="proprietary"
+            fi
+        else
+            echo "NVIDIA driver variant: $NVIDIA_VARIANT"
+        fi
+        break
+    fi
+done
 
-#################################################
-#                    WM                         #
-#################################################
+# 3) Window manager
 WM=""
-WM_TYPE=""   # x11 | wayland
-WM_CONFIGS=() # relative paths inside the dotfiles repo to install for this WM
-
+WM_TYPE=""
+WM_CONFIGS=()
 while true; do
-    echo "Which window manager do you wanna use?"
+    echo
+    echo "Which window manager do you want?"
     echo "  X11:     1) bspwm   2) dwm"
     echo "  Wayland: 3) hyprland"
 
     read -rp ": " choice
 
     case "$choice" in
-        1) WM="bspwm";    WM_TYPE="x11";     WM_CONFIGS=(".config/bspwm");                                                  break ;;
-        2) WM="dwm";      WM_TYPE="x11";     WM_CONFIGS=(".config/dwm");                                                    break ;;
+        1) WM="bspwm";    WM_TYPE="x11";     WM_CONFIGS=(".config/bspwm");                                                    break ;;
+        2) WM="dwm";      WM_TYPE="x11";     WM_CONFIGS=(".config/dwm");                                                      break ;;
         3) WM="hyprland"; WM_TYPE="wayland"; WM_CONFIGS=(".config/hypr" ".config/swaync" ".config/waybar" ".config/wlogout"); break ;;
         *) echo "Unknown option '$choice'" ;;
     esac
 done
 
-echo "Installing $WM.."
+# 4) VM? (and osx / ufw follow-ups)
+WANT_VM=0
+WANT_VM_OSX=0
+WANT_UFW=0
+if "$PROMPT_BIN" "Do you want to use virtual machines?"; then
+    WANT_VM=1
+    "$PROMPT_BIN" "  -> virtualize OSX too?"        && WANT_VM_OSX=1 || true
+    "$PROMPT_BIN" "  -> do you use UFW as firewall?" && WANT_UFW=1    || true
+fi
+
+# 5) Dev groups (checkbox)
+echo
+echo "-> Pick DEV package groups to install."
+sleep 1
+DEV_ITEMS="$(CORE_PHASE=list-dev "$CORE_BIN" | awk -F'\t' '{printf "%s\t%s\t1\n", $1, $2}')"
+SELECTED_DEV="$(printf '%s\n' "$DEV_ITEMS" | "$CHECKBOX_BIN" "Dev package groups (space=toggle, enter=confirm)")"
+
+# 6) Optional groups (checkbox)
+echo "-> Pick OPTIONAL package groups to install."
+sleep 1
+OPT_ITEMS="$(CORE_PHASE=list-opt "$CORE_BIN" | awk -F'\t' '{printf "%s\t%s\t1\n", $1, $2}')"
+SELECTED_OPT="$(printf '%s\n' "$OPT_ITEMS" | "$CHECKBOX_BIN" "Optional package groups (space=toggle, enter=confirm)")"
+
+CORE_DEV_GROUPS="$(echo "$SELECTED_DEV" | tr '\n' ' ' | sed -e 's/  */ /g' -e 's/^ //' -e 's/ $//')"
+CORE_OPT_GROUPS="$(echo "$SELECTED_OPT" | tr '\n' ' ' | sed -e 's/  */ /g' -e 's/^ //' -e 's/ $//')"
+[[ -z "$CORE_DEV_GROUPS" ]] && CORE_DEV_GROUPS="none"
+[[ -z "$CORE_OPT_GROUPS" ]] && CORE_OPT_GROUPS="none"
+
+export CORE_DEV_GROUPS
+export CORE_OPT_GROUPS
+export CORE_NVIDIA_VARIANT="$NVIDIA_VARIANT"
+export CORE_GPU_VENDORS="${GPU_VENDORS[*]}"
+
+#################################################
+#              COMPUTE TOTAL COUNT              #
+#################################################
+CORE_COUNT="$(CORE_PHASE=count "$CORE_BIN")"
+WM_COUNT="$(COUNT_ONLY=1 "$THIS_DIR/install/$WM_TYPE/$WM")"
+VM_COUNT=0
+if (( WANT_VM )); then
+    VM_COUNT="$(COUNT_ONLY=1 WANT_VM_OSX="$WANT_VM_OSX" "$THIS_DIR/install/kvm")"
+fi
+TOTAL=$(( CORE_COUNT + WM_COUNT + VM_COUNT ))
+
+#################################################
+#                    SUMMARY                    #
+#################################################
+echo
+echo "================================================================"
+printf '%-22s %s\n' "GPU"          "${GPU_VENDORS[*]}${NVIDIA_VARIANT:+ ($NVIDIA_VARIANT)}"
+printf '%-22s %s\n' "WM"           "$WM ($WM_TYPE)"
+printf '%-22s %s\n' "VMs"          "$( (( WANT_VM )) && echo "yes (osx=$WANT_VM_OSX, ufw=$WANT_UFW)" || echo "no" )"
+printf '%-22s %s\n' "Dev groups"   "$CORE_DEV_GROUPS"
+printf '%-22s %s\n' "Opt groups"   "$CORE_OPT_GROUPS"
+printf '%-22s %s\n' "Packages"     "$TOTAL  (core=$CORE_COUNT, wm=$WM_COUNT, vm=$VM_COUNT)"
+echo "================================================================"
+echo
+echo -n "Starting in 3" && sleep 1
+echo -n ", 2"          && sleep 1
+echo    ", 1"          && sleep 1
+
+#################################################
+#                   DOTFILES                    #
+#################################################
+echo "-> Fetching dotfiles.."
+"$DOTFILES_BIN" >/dev/null
+
+#################################################
+#                  PACMAN -SYU                  #
+#################################################
+echo "-> Running system update (pacman -Syu).."
+sudo pacman -Syu --noconfirm
+
+#################################################
+#                 PROGRESS UI                   #
+#################################################
+export ARCH_SETUP_PROGRESS_STATE="${XDG_RUNTIME_DIR:-/tmp}/arch-setup-progress.$$"
+export ARCH_SETUP_PROGRESS_TTY="/dev/tty"
+"$PROGRESS_BIN" init "$TOTAL"
+
+#################################################
+#                CORE PACKAGES                  #
+#################################################
+"$CORE_BIN" "${GPU_VENDORS[@]}"
+
+#################################################
+#                    WM                         #
+#################################################
 "$THIS_DIR/install/$WM_TYPE/$WM"
 
 #################################################
 #                    VM                         #
 #################################################
-if "$PROMPT_BIN" "Do you want to use virtual machines?"; then
-    "$THIS_DIR/install/kvm"
+if (( WANT_VM )); then
+    WANT_VM_OSX="$WANT_VM_OSX" WANT_UFW="$WANT_UFW" "$THIS_DIR/install/kvm"
 fi
+
+#################################################
+#               WRAP UP PROGRESS                #
+#################################################
+"$PROGRESS_BIN" finish
+unset ARCH_SETUP_PROGRESS_STATE
 
 #################################################
 #                  CONFIG                       #
@@ -146,7 +306,6 @@ fi
 echo ">> Configuration <<"
 append_line_if_missing "$KEYBOARD_CFG" "$HOME/.xinitrc"
 
-# Install config files from the dotfiles repo (prompts on collision, backs up existing).
 CONFIGS=("${WM_CONFIGS[@]}" ".config/nvim" ".zshrc" "Scripts")
 [[ "$WM_TYPE" == "x11" ]] && CONFIGS+=(".Xresources")
 "$INSTALL_CONFIG_BIN" "${CONFIGS[@]}"

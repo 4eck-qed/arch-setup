@@ -4,10 +4,8 @@ set -euo pipefail
 THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 ROOT_DIR="$(cd -- "$THIS_DIR/.." && pwd)"
 PROMPT_BIN="$ROOT_DIR/support/prompt"
+INSTALL_PKGS="$ROOT_DIR/support/install_packages"
 
-#################################################
-#                   PACKAGES                    #
-#################################################
 PKGS=(
     libvirt
     qemu-desktop
@@ -19,10 +17,16 @@ PKGS=(
     libnbd
 )
 
-#################################################
-#                    RUN                        #
-#################################################
-"$ROOT_DIR/support/install_packages" "${PKGS[@]}"
+if [[ "${COUNT_ONLY:-0}" == "1" ]]; then
+    count=${#PKGS[@]}
+    if [[ "${WANT_VM_OSX:-0}" == "1" && -x "$THIS_DIR/kvm_osx" ]]; then
+        count=$(( count + $(COUNT_ONLY=1 "$THIS_DIR/kvm_osx") ))
+    fi
+    printf '%s\n' "$count"
+    exit 0
+fi
+
+SEG_LABEL="VM (kvm)" "$INSTALL_PKGS" "${PKGS[@]}"
 
 # libnbd occasionally conflicts with files from other packages
 sudo pacman -S --needed --noconfirm --overwrite '/usr/lib/*' libnbd || true
@@ -37,11 +41,22 @@ sudo virsh net-autostart default 2>/dev/null || true
 
 sudo usermod -aG libvirt,kvm,input "$USER"
 
-if [[ -x "$PROMPT_BIN" ]] && "$PROMPT_BIN" "Wanna virtualize OSX?"; then
+# If the caller pre-answered the osx/ufw prompts (arch-setup does this so
+# all interactive questions happen up front), use those answers. Otherwise
+# fall back to asking here.
+want_osx="${WANT_VM_OSX:-}"
+if [[ -z "$want_osx" && -x "$PROMPT_BIN" ]]; then
+    if "$PROMPT_BIN" "Wanna virtualize OSX?"; then want_osx=1; else want_osx=0; fi
+fi
+if [[ "$want_osx" == "1" ]]; then
     "$THIS_DIR/kvm_osx"
 fi
 
-if [[ -x "$PROMPT_BIN" ]] && "$PROMPT_BIN" "Do you use UFW as firewall?"; then
+want_ufw="${WANT_UFW:-}"
+if [[ -z "$want_ufw" && -x "$PROMPT_BIN" ]]; then
+    if "$PROMPT_BIN" "Do you use UFW as firewall?"; then want_ufw=1; else want_ufw=0; fi
+fi
+if [[ "$want_ufw" == "1" ]]; then
     echo "Adding UFW rules for virbr0.."
     if ! sudo grep -q "^\*nat" /etc/ufw/before.rules; then
         sudo sed -i '1i *nat\n:POSTROUTING ACCEPT [0:0]\n-A POSTROUTING -s 192.168.122.0/24 -j MASQUERADE\nCOMMIT\n' /etc/ufw/before.rules
@@ -56,4 +71,3 @@ fi
 
 echo ""
 echo "Done. Log out and back in for libvirt/kvm/input group membership to take effect."
-
