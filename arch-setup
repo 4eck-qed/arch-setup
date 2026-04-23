@@ -9,8 +9,11 @@ THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 #################################################
 KEYBOARD_CFG="setxkbmap -layout us -variant altgr-intl"
 PROMPT_BIN="$THIS_DIR/support/prompt"
+DOTFILES_BIN="$THIS_DIR/support/dotfiles"
+INSTALL_CONFIG_BIN="$THIS_DIR/support/install_config"
 
 export AUR_HELPER="paru"
+export DOTFILES_DIR="${DOTFILES_DIR:-$HOME/dotfiles}"
 
 #################################################
 #                   FUNCTIONS                   #
@@ -68,10 +71,15 @@ if [[ -f "$THIS_DIR/.gitmodules" ]]; then
     git -C "$THIS_DIR" submodule update --init --recursive
 fi
 
-[[ -x "$PROMPT_BIN" ]] || {
-    echo "Prompt helper not found or not executable: $PROMPT_BIN" >&2
-    exit 1
-}
+for bin in "$PROMPT_BIN" "$DOTFILES_BIN" "$INSTALL_CONFIG_BIN"; do
+    [[ -x "$bin" ]] || {
+        echo "Support helper not found or not executable: $bin" >&2
+        exit 1
+    }
+done
+
+echo "-> Fetching dotfiles.."
+"$DOTFILES_BIN" >/dev/null
 
 echo "Welcome to barons one-script-to-success!" && sleep 1
 echo -n "We're starting in 3" && sleep 1
@@ -103,6 +111,10 @@ fi
 #################################################
 #                    WM                         #
 #################################################
+WM=""
+WM_TYPE=""   # x11 | wayland
+WM_CONFIGS=() # relative paths inside the dotfiles repo to install for this WM
+
 while true; do
     echo "Which window manager do you wanna use?"
     echo "  X11:     1) bspwm   2) dwm"
@@ -111,12 +123,15 @@ while true; do
     read -rp ": " choice
 
     case "$choice" in
-        1) echo "Installing bspwm..";    "$THIS_DIR/install/x11/bspwm";        break ;;
-        2) echo "Installing dwm..";      "$THIS_DIR/install/x11/dwm";          break ;;
-        3) echo "Installing hyprland.."; "$THIS_DIR/install/wayland/hyprland"; break ;;
+        1) WM="bspwm";    WM_TYPE="x11";     WM_CONFIGS=(".config/bspwm");                                                  break ;;
+        2) WM="dwm";      WM_TYPE="x11";     WM_CONFIGS=(".config/dwm");                                                    break ;;
+        3) WM="hyprland"; WM_TYPE="wayland"; WM_CONFIGS=(".config/hypr" ".config/swaync" ".config/waybar" ".config/wlogout"); break ;;
         *) echo "Unknown option '$choice'" ;;
     esac
 done
+
+echo "Installing $WM.."
+"$THIS_DIR/install/$WM_TYPE/$WM"
 
 #################################################
 #                    VM                         #
@@ -130,6 +145,11 @@ fi
 #################################################
 echo ">> Configuration <<"
 append_line_if_missing "$KEYBOARD_CFG" "$HOME/.xinitrc"
+
+# Install config files from the dotfiles repo (prompts on collision, backs up existing).
+CONFIGS=("${WM_CONFIGS[@]}" ".zshrc" "Scripts")
+[[ "$WM_TYPE" == "x11" ]] && CONFIGS+=(".Xresources")
+"$INSTALL_CONFIG_BIN" "${CONFIGS[@]}"
 
 # Disable automatic core dumps
 sudo touch /etc/sysctl.d/50-coredump.conf

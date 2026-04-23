@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Copy one or more paths from $DOTFILES_DIR into $HOME.
+# On collision, prompt the user; if they replace, the existing target is
+# backed up to <target>.bak.<timestamp> first.
+#
+# Usage: install_config <rel-path> [rel-path ...]
+# Env:   DOTFILES_DIR  path to the cloned dotfiles repo (required)
+set -uo pipefail
+
+: "${DOTFILES_DIR:?DOTFILES_DIR must be set}"
+
+THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+PROMPT="$THIS_DIR/prompt"
+
+[[ -x "$PROMPT" ]] || { echo "prompt helper not found: $PROMPT" >&2; exit 1; }
+
+install_one() {
+    local rel="$1"
+    local src="$DOTFILES_DIR/$rel"
+    local dst="$HOME/$rel"
+
+    if [[ ! -e "$src" ]]; then
+        echo "-> $rel: not present in dotfiles, skipping"
+        return 0
+    fi
+
+    if [[ -e "$dst" || -L "$dst" ]]; then
+        echo "-> $rel already exists at $dst"
+        if ! "$PROMPT" "Replace with dotfiles version? (existing will be backed up)"; then
+            echo "   keeping existing $dst"
+            return 0
+        fi
+        local bak="${dst}.bak.$(date +%Y%m%d-%H%M%S)"
+        mv -- "$dst" "$bak"
+        echo "   backed up existing -> $bak"
+    fi
+
+    mkdir -p -- "$(dirname -- "$dst")"
+    cp -a -- "$src" "$dst"
+    echo "-> $rel installed"
+}
+
+for rel in "$@"; do
+    install_one "$rel"
+done
+
