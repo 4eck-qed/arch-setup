@@ -89,6 +89,7 @@ FONTS=(
     ttf-inconsolata             # Inconsolata
     ttf-fira-code               # FiraCode
     ttf-hack-nerd               # Hack Nerd Font
+    otf-hasklig                 # Hasklig (Source Code Pro + ligatures)
     cantarell-fonts             # Cantarell (dunst/calendar)
 )
 
@@ -364,8 +365,6 @@ install_pkgs "${DESKTOP[@]}"
 
 echo ">> Fonts <<"
 install_pkgs "${FONTS[@]}"
-mkdir -p "$HOME/.local/share/fonts"
-cp -rT "$DOTFILES_DIR/.local/share/fonts" "$HOME/.local/share/fonts"
 fc-cache -fv
 
 echo ">> Security <<"
