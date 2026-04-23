@@ -37,6 +37,7 @@ CORE_UTILS=(
     unzip                       # .zip extraction
     unrar                       # .rar extraction
     7zip
+    cpio                        # A tool to copy files into or out of a cpio or tar archive
     man-db                      # man page tooling
     man-pages                   # Linux man pages
     bat                         # cat with syntax highlighting

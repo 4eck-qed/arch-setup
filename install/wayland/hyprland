@@ -16,3 +16,9 @@ THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
     xdg-desktop-portal-hyprland     `# portal backend (screen share, file pickers)` \
     wlogout                         `# logout/shutdown menu`
 
+# split-workspaces
+hyprpm update
+hyprpm add https://github.com/zjeffer/split-monitor-workspaces
+hyprpm enable split-monitor-workspaces
+hyprpm reload
+

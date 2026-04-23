@@ -147,9 +147,20 @@ echo ">> Configuration <<"
 append_line_if_missing "$KEYBOARD_CFG" "$HOME/.xinitrc"
 
 # Install config files from the dotfiles repo (prompts on collision, backs up existing).
-CONFIGS=("${WM_CONFIGS[@]}" ".zshrc" "Scripts")
+CONFIGS=("${WM_CONFIGS[@]}" ".config/nvim" ".zshrc" "Scripts")
 [[ "$WM_TYPE" == "x11" ]] && CONFIGS+=(".Xresources")
 "$INSTALL_CONFIG_BIN" "${CONFIGS[@]}"
+
+# Make zsh the user's login shell (zsh was installed by install/core).
+ZSH_BIN="$(command -v zsh || true)"
+if [[ -n "$ZSH_BIN" ]]; then
+    grep -qxF "$ZSH_BIN" /etc/shells || echo "$ZSH_BIN" | sudo tee -a /etc/shells >/dev/null
+    CURRENT_SHELL="$(getent passwd "$USER" | cut -d: -f7)"
+    if [[ "$CURRENT_SHELL" != "$ZSH_BIN" ]]; then
+        echo "-> Setting login shell to $ZSH_BIN"
+        sudo chsh -s "$ZSH_BIN" "$USER"
+    fi
+fi
 
 # Disable automatic core dumps
 sudo touch /etc/sysctl.d/50-coredump.conf
