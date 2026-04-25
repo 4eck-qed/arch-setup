@@ -77,8 +77,38 @@ for pkg in "${pkgs[@]}"; do
     i=$((i + 1))
 done
 
+aur_reachable() {
+    curl -sf --max-time 10 'https://aur.archlinux.org/rpc/v5/info' >/dev/null 2>&1
+}
+
 if (( ${#failed[@]} > 0 )); then
-    echo ""
-    echo "failed to install: ${failed[*]}" >&2
-    exit 1
+    while (( ${#failed[@]} > 0 )); do
+        echo "" >&2
+        echo "failed to install: ${failed[*]}" >&2
+        echo "" >&2
+        if ! aur_reachable; then
+            echo "AUR (aur.archlinux.org) appears to be unreachable -- it may be under a DDoS attack or experiencing downtime." >&2
+            echo "" >&2
+        fi
+        printf 'Retry %d failed package(s)? [y/N] ' "${#failed[@]}" >&2
+        read -r answer </dev/tty || break
+        case "$answer" in
+            [yY]*) ;;
+            *) break ;;
+        esac
+
+        retrying=("${failed[@]}")
+        failed=()
+        for pkg in "${retrying[@]}"; do
+            if ! install_pkg "$pkg"; then
+                failed+=("$pkg")
+            fi
+        done
+    done
+
+    if (( ${#failed[@]} > 0 )); then
+        echo "" >&2
+        echo "giving up on: ${failed[*]}" >&2
+        exit 1
+    fi
 fi
