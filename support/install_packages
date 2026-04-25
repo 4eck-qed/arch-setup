@@ -108,7 +108,6 @@ if (( ${#failed[@]} > 0 )); then
 
     if (( ${#failed[@]} > 0 )); then
         echo "" >&2
-        echo "giving up on: ${failed[*]}" >&2
-        exit 1
+        echo "skipping: ${failed[*]}" >&2
     fi
 fi
