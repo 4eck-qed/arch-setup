@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 
 THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 ROOT_DIR="$(cd -- "$THIS_DIR/.." && pwd)"
@@ -19,11 +19,11 @@ fi
 
 SEG_LABEL="VM (osx)" "$INSTALL_PKGS" "${PKGS[@]}"
 
-cd "$HOME"
-if [[ ! -d OSX-KVM ]]; then
-    git clone --depth 1 --recursive https://github.com/kholia/OSX-KVM.git
+osx_dir="$HOME/OSX-KVM"
+if [[ ! -d "$osx_dir" ]]; then
+    git clone --depth 1 --recursive https://github.com/kholia/OSX-KVM.git "$osx_dir"
 fi
-cd OSX-KVM
+cd "$osx_dir"
 
 # OSX guests read MSRs that linux kvm doesn't emulate; ignoring them prevents crashes.
 if grep -q "AuthenticAMD" /proc/cpuinfo; then

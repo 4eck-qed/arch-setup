@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 
 THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 ROOT_DIR="$(cd -- "$THIS_DIR/../.." && pwd)"

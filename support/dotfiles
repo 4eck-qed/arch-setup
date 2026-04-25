@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 
 DOTFILES_URL="${DOTFILES_URL:-https://github.com/4eck-qed/dotfiles.git}"
 DOTFILES_DIR="${DOTFILES_DIR:-$HOME/dotfiles}"

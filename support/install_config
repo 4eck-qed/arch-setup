@@ -5,7 +5,7 @@
 #
 # Usage: install_config <rel-path> [rel-path ...]
 # Env:   DOTFILES_DIR  path to the cloned dotfiles repo (required)
-set -uo pipefail
+set -euo pipefail
 
 : "${DOTFILES_DIR:?DOTFILES_DIR must be set}"
 

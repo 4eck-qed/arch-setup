@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 
 : "${AUR_HELPER:=paru}"
 
@@ -13,5 +13,5 @@ echo "  - Add to shell rc    -> 'export DOCKER_HOST=unix://\$XDG_RUNTIME_DIR/doc
 echo "  - Create '/etc/modprobe.d/disable-overlay-redirect-dir.conf':"
 echo "      options overlay metacopy=off redirect_dir=off"
 
-sudo modprobe -r overlay
+sudo modprobe -r overlay || true
 sudo modprobe overlay

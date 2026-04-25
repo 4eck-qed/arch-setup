@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 
 THIS_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 ROOT_DIR="$(cd -- "$THIS_DIR/.." && pwd)"
@@ -353,11 +353,15 @@ done
 #################################################
 enable_multilib() {
     local pacman_conf="/etc/pacman.conf"
-    sudo -v
     if grep -qE '^\s*\[multilib\]' "$pacman_conf"; then
         echo "Multilib repository is already enabled."
     else
         sudo sed -i '/^#\[multilib\]/,/^#Include/{s/^#//}' "$pacman_conf"
+        if ! grep -qE '^\s*\[multilib\]' "$pacman_conf"; then
+            echo "ERROR: could not enable multilib in $pacman_conf" >&2
+            echo "  Uncomment [multilib] and its Include line manually, then rerun." >&2
+            exit 1
+        fi
         echo "Multilib repository enabled."
     fi
     sudo pacman -Syu --noconfirm
@@ -373,7 +377,10 @@ install_paru() {
     local build_dir
     build_dir="$(mktemp -d)"
     trap 'rm -rf "$build_dir"' RETURN
-    git clone https://aur.archlinux.org/paru.git "$build_dir/paru"
+    if ! git clone https://aur.archlinux.org/paru.git "$build_dir/paru"; then
+        echo "AUR unreachable, falling back to GitHub mirror..."
+        git clone --branch paru --single-branch https://github.com/archlinux/aur.git "$build_dir/paru"
+    fi
     (cd "$build_dir/paru" && makepkg -si --noconfirm)
 }
 
